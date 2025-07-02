@@ -1,0 +1,106 @@
+#! /bin/bash
+
+#SBATCH --job-name=WO8HSE
+#SBATCH --account=p32092
+##SBATCH --constraint=quest6
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=64
+#SBATCH --time=48:00:00
+#SBATCH --partition=normal
+##SBATCH --mem=2G
+
+
+#OpenMP settings:
+ulimit -s unlimited
+export OMP_NUM_THREADS=1
+
+#run the application:
+#module load mpi/intel-mpi-5.1.3.258
+module use /hpc/software/spack_v17d2/spack/share/spack/modules/linux-rhel7-x86_64/
+module load vasp/6.4.2-openmpi-intel
+
+vasp_std='/hpc/software/spack_v20d1/spack/opt/spack/linux-rhel7-x86_64/intel-2021.4.0/vasp-6.4.2-openmpi-intel-hdf5-cpu-only/vasp_std'
+
+starttime=$(date +%s)
+
+echo "SLURM_NTASKS: " $SLURM_NTASKS
+###################################################################################################
+echo `date` "Starting job ..." > status.txt
+#echo `date` "Execute" Job$2 "in" $1 "using" Slot$3  >> status.txt
+
+if [ ! -f vasprun.xml.relaxed.gz ]
+then
+  cp INCAR INCAR.orig
+  cp KPOINTS KPOINTS.orig
+  if [ -s CONTCAR ]
+  then
+        echo `date` "Found CONTCAR, copy CONTCAR to POSCAR ..." >> status.txt
+        cp CONTCAR POSCAR
+  else
+    cp POSCAR POSCAR.orig
+  fi
+  #echo `date` "Running VASP using $5 cores with host $4$3 ..." >> status.txt
+  mpirun -np $SLURM_NTASKS $vasp_std > vasp.out
+  echo `date` `tail -n -1 OSZICAR` >> status.txt
+
+  rel=`tail -1 OSZICAR | cut -c 1-4`
+
+  while [ ${rel} -gt 10 ]; do
+
+    rm WAVECAR
+
+    cp CONTCAR POSCAR
+    echo `date` "Running VASP using $5 cores with host $4$3 ..." >> status.txt
+    export test=`grep -A 85 "magnetization (x)" OUTCAR  |  awk '{print $5}'  | tail -82`
+    export verv=`echo MAGMOM = $test`
+    ions=`grep "NIONS"  OUTCAR | awk '{print $12}'`
+    echo "No. IONS. $ions"
+    offset1=`echo $ions + 4 | bc`
+    offset2=`echo $ions +1 | bc`
+    echo "OFFSET 1,2 $offset1 $offset2"
+
+    magmom=`grep -A ${offset1} "magnetization (x)" OUTCAR  |  awk '{print $5}'  | tail -${offset2}`
+    magstring=`echo MAGMOM = $magmom`
+    echo "MAGMOM string: ${magstring}"
+    sed -i  's|MAGMOM.*|'"${magstring}"'|g' INCAR
+    echo `date` "Copy magnetic moment from previous OUTCAR" >> status.txt
+
+
+#mpirun -np $SLURM_NTASKS /opt/packages/VASP/VASP6/6.2/INTEL/vasp_std > stdout.txt 2> stderr.txt
+    #mpiexec -np $5 -hostfile $4$3 vasp_std > vasp.out
+    mpirun -np $SLURM_NTASKS $vasp_std > vasp.out
+    echo `date` `tail -n -1 OSZICAR` >> status.txt
+    rel=`grep -v '^$' OSZICAR| tail -1 | cut -c 1-4`
+    if [ ${rel} -gt 10 ]
+    then
+            echo `date` "No. of ionic steps ${rel} doesn't meet the requirement (<10), restarting ....." >> status.txt
+    fi
+  done
+
+  if [ ${rel} -lt 10 ]
+  then
+    echo `date` "Calculation finished!" >> status.txt
+    mv CONTCAR CONTCAR.relaxed
+    mv DOSCAR DOSCAR.relaxed
+    mv EIGENVAL EIGENVAL.relaxed
+    mv IBZKPT IBZKPT.relaxed
+    mv INCAR INCAR.relaxed
+    mv KPOINTS KPOINTS.relaxed
+    mv OSZICAR OSZICAR.relaxed
+    mv OUTCAR OUTCAR.relaxed
+    mv POSCAR POSCAR.relaxed
+    mv PROCAR PROCAR.relaxed
+    mv vasprun.xml vasprun.xml.relaxed
+    #mv vasp.out vasp.out.relaxed
+    rm WAVECAR 
+    echo `date` "Ending job ..." >> status.txt
+    gzip -f  *
+    exit 0
+  else
+    echo `date` "Error or unfinished job!" >> status.txt
+    exit 1
+  fi
+else
+  echo `date` "vasprun.xml.relaxed.gz exist, skip this calculation ....." >> status.txt
+  exit 0
+fi
