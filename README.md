@@ -1,7 +1,7 @@
 # data_VoltageHysteresis
 <h4 align="center">
 
-![image]([https://zenodo.org/badge/DOI/10.5281/zenodo.13985508.svg](https://zenodo.org/badge/1012768110.svg)
+![image](https://zenodo.org/badge/1012768110.svg)
 
 </h4>
 
